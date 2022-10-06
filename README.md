@@ -1,4 +1,4 @@
-# Project 1 Template
+# Project 2 Template
 
 ## Clone
 
