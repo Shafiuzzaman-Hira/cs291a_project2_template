@@ -18,59 +18,45 @@ def main(event:, context:)
   status_code = nil
   body_content = nil
   header_contents = {}
-  event['headers'].keys.each do |content|
-    header_contents[content] = event['headers'][content]
-  end
+  event["headers"].keys.map{|content| header_contents[content.downcase] = event["headers"][content]}
+  
   if event['httpMethod'] == 'GET' and event['path'] == "/"
-    auth_content = header_contents['Authorization'].split(" ")
-    token = auth_content[1]
-    # Responds 403 if a proper Authorization: Bearer <TOKEN> header is not provided
-    if auth_content[0] != "Bearer"
-      status_code = 403
-      body_content = nil
-      return response(body: body_content , status: status_code)
-    else 
+    if header_contents.keys.include? "authorization" 
+      token = header_contents["authorization"][7..-1]
       begin
         decoded_token = JWT.decode token, ENV['JWT_SECRET'], true, { algorithm: 'HS256' }
-        body_content =  decoded_token[0]["data"] 
-        status_code = 200
-        return response(body: body_content , status: status_code)
-      rescue JWT::ExpiredSignature, JWT::ImmatureSignature
-        status_code = 401
-        body_content = nil
-        return response(body: body_content , status: status_code)
+        decoded_token = decoded_token[0]
+      rescue JWT::ImmatureSignature, JWT::ExpiredSignature
+        return response(status: 401)
+      rescue StandardError
+        return response(status: 403)
       end
-    end
-  elsif event['path'] == "/token"
-    if event['httpMethod'] == 'POST'
-      if event['body'] == nil
-        return response(body: nil , status: 422)
-      end
-      payload = {}
-      if event['headers'].keys.include? "Content-Type" and   header_contents['Content-Type'] != 'application/json' 
-        status_code = 415
-        return response(body: nil , status: status_code)
-      else
-        if !is_json (event['body'])
-          status_code = 422
-          return response(body: nil , status: status_code)
-        #elsif event['body'] = '{}'
-        # status_code = 201
-        # return response(body: body_content , status: status_code)
-        else
-          payload["data"] = JSON.parse(event['body'])
-          payload["nbf"] = Time.now.to_i + 2
-          payload["exp"] = Time.now.to_i + 5
-          payload = {data: payload, exp: Time.now.to_i + 5, nbf: Time.now.to_i + 2}
-          status_code = 201
-          generated_jwt = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
-          body_content = {"token" => generated_jwt}
-          return response(body: body_content , status: status_code)
-        end
-      end
+      return response(body: decoded_token["data"], status: 200)
     else
-      status_code = 405
+      return response(status: 403)
+    end
+  elsif event['httpMethod'] == 'POST' and event['path'] == "/token"
+
+    # Responds 422 if the body of the request is not actually json.
+    if !is_json (event['body'])
+      status_code = 422
       return response(body: nil , status: status_code)
+    end
+
+    if header_contents['content-type'] == 'application/json'
+      payload = {data: JSON.parse(event['body']), exp: Time.now.to_i + 5,nbf: Time.now.to_i + 2}
+      status_code = 201
+      generated_jwt = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
+      return response(body: {"token":generated_jwt } , status: status_code)
+
+    # Responds 415 if the request content type is not application/json
+    elsif header_contents['content-type'] != 'application/json'
+      status_code = 415
+      return response(body: nil , status: status_code)
+    else
+    # Requests to any other resources must respond with status code 404
+       status_code = 404
+       return response(body: nil , status: status_code)
     end
   else
     status_code = 404
