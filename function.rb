@@ -20,46 +20,48 @@ def main(event:, context:)
   header_contents = {}
   event["headers"].keys.map{|content| header_contents[content.downcase] = event["headers"][content]}
   
-  if event['httpMethod'] == 'GET' and event['path'] == "/"
-    if header_contents.keys.include? "authorization" 
-      token = header_contents["authorization"][7..-1]
-      begin
-        decoded_token = JWT.decode token, ENV['JWT_SECRET'], true, { algorithm: 'HS256' }
-        decoded_token = decoded_token[0]
-      rescue JWT::ImmatureSignature, JWT::ExpiredSignature
-        return response(status: 401)
-      rescue StandardError
+  if event['httpMethod'] == 'GET'
+    if event['path'] == "/"
+      if header_contents.keys.include? "authorization" 
+        token = header_contents["authorization"][7..-1]
+        begin
+          decoded_token = JWT.decode token, ENV['JWT_SECRET'], true, { algorithm: 'HS256' }
+          decoded_token = decoded_token[0]
+        rescue JWT::ImmatureSignature, JWT::ExpiredSignature
+          return response(status: 401)
+        rescue StandardError
+          return response(status: 403)
+        end
+        return response(body: decoded_token["data"], status: 200)
+      else
         return response(status: 403)
       end
-      return response(body: decoded_token["data"], status: 200)
-    else
-      return response(status: 403)
+    elsif event['path'] == "/token"
+      status_code = 405
+      return response(body: nil , status: status_code)
+    else 
+      status_code = 404
+      return response(body: nil , status: status_code)
     end
   elsif event['httpMethod'] == 'POST' and event['path'] == "/token"
-
-    # Responds 422 if the body of the request is not actually json.
     if !is_json (event['body'])
       status_code = 422
       return response(body: nil , status: status_code)
     end
-
     if header_contents['content-type'] == 'application/json'
       payload = {data: JSON.parse(event['body']), exp: Time.now.to_i + 5,nbf: Time.now.to_i + 2}
       status_code = 201
       generated_jwt = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
       return response(body: {"token":generated_jwt } , status: status_code)
-
-    # Responds 415 if the request content type is not application/json
     elsif header_contents['content-type'] != 'application/json'
       status_code = 415
       return response(body: nil , status: status_code)
     else
-    # Requests to any other resources must respond with status code 404
-       status_code = 404
-       return response(body: nil , status: status_code)
+      status_code = 404
+      return response(body: nil , status: status_code)
     end
   else
-    status_code = 404
+    status_code = 405
     return response(body: nil , status: status_code)
   end
 end
